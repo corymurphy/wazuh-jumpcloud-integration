@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/lbrictson/wazuh-jumpcloud-integration/pkg"
 	"os"
+
+	"github.com/lbrictson/wazuh-jumpcloud-integration/pkg"
 )
 
 func main() {
@@ -18,9 +19,11 @@ func main() {
 		os.Exit(1)
 	}
 	jcAPI := pkg.NewJumpCloudAPI(pkg.NewJumpCloudAPIOptions{
-		APIKey:  conf.APIKey,
-		BaseURL: conf.BaseURL,
-		OrgID:   conf.OrgID,
+		APIKey:       conf.APIKey,
+		BaseURL:      conf.BaseURL,
+		OrgID:        conf.OrgID,
+		ClientID:     conf.ClientID,
+		ClientSecret: conf.ClientSecret,
 	})
 	err = pkg.RunService(conf, jcAPI, os.Args[2])
 	if err != nil {
@@ -28,5 +31,4 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("Successfully ran JumpCloud event service")
-	return
 }

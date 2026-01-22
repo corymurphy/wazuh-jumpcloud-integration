@@ -1,12 +1,21 @@
 package pkg
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+const (
+	defaultBaseURL  = "https://console.jumpcloud.com"
+	defaultTokenUrl = "https://admin-oauth.id.jumpcloud.com/oauth2/token"
 )
 
 // Valid JumpCloud service types are:
@@ -22,50 +31,76 @@ import (
 
 // JumpCloudAPI can be used to interact with the JumpCloud API
 type JumpCloudAPI struct {
-	apiKey  string
-	baseURL string
-	orgID   string
+	baseURL  string
+	tokenURL string
+	orgID    string
+
+	apiKey string
+
+	clientID         string
+	clientSecret     string
+	serviceAccount   bool
+	accessToken      string
+	accessTokenExpry int64
+
+	client *http.Client
 }
 
 // NewJumpCloudAPIOptions are the options for creating a new JumpCloudAPI object
 type NewJumpCloudAPIOptions struct {
-	APIKey  string
-	BaseURL string
-	OrgID   string
+	BaseURL  string
+	TokenURL string
+
+	OrgID string
+
+	APIKey string
+
+	ClientID     string
+	ClientSecret string
+
+	ServiceAccount bool
 }
 
 // NewJumpCloudAPI returns a new JumpCloudAPI object, if you do not provide a base URL, it will default to the JumpCloud API
 func NewJumpCloudAPI(options NewJumpCloudAPIOptions) *JumpCloudAPI {
 	a := JumpCloudAPI{
-		apiKey:  options.APIKey,
-		baseURL: options.BaseURL,
-		orgID:   options.OrgID,
+		apiKey:         options.APIKey,
+		baseURL:        options.BaseURL,
+		orgID:          options.OrgID,
+		tokenURL:       options.TokenURL,
+		clientID:       options.ClientID,
+		clientSecret:   options.ClientSecret,
+		serviceAccount: false,
+		client:         &http.Client{Timeout: 15 * time.Second},
 	}
 	if options.BaseURL == "" {
-		a.baseURL = "https://api.jumpcloud.com"
+		a.baseURL = defaultBaseURL
+	}
+	if options.TokenURL == "" {
+		a.tokenURL = defaultTokenUrl
+	}
+	if a.clientID != "" && a.clientSecret != "" {
+		a.serviceAccount = true
 	}
 	return &a
 }
 
 // GetEventsSinceTime returns all JumpCloud events since the given time
 func (a *JumpCloudAPI) GetEventsSinceTime(startTime time.Time) (*JumpCloudEvents, error) {
-	url := a.baseURL + "/insights/directory/v1/events"
-	method := "POST"
 	// JumpCloud API requires a time in RFC3339 format
 	starterTime := startTime.Format(time.RFC3339)
 	payload := strings.NewReader(fmt.Sprintf(`{"service": ["all"], "start_time": "%v", "limit": 10000}`, starterTime))
-	// Default Go HTTP client, might need to customize this later
-	client := &http.Client{}
-	req, err := http.NewRequest(method, url, payload)
+
+	req, err := a.CreateAuthenticatedRequest("POST", fmt.Sprintf("%s/insights/directory/v1/events", a.baseURL), payload)
+
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %v", err)
 	}
-	req.Header.Add("x-api-key", a.apiKey)
 	req.Header.Add("Content-Type", "application/json")
 	if a.orgID != "" {
 		req.Header.Add("x-org-id", a.orgID)
 	}
-	res, err := client.Do(req)
+	res, err := a.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("error making request: %v", err)
 	}
@@ -97,6 +132,81 @@ type JumpCloudEvents struct {
 
 type BaseJumpCloudEvent struct {
 	Service string `json:"service"`
+}
+
+type OAuth2TokenResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+	Scope       string `json:"scope"`
+	TokenType   string `json:"token_type"`
+}
+
+func (c *JumpCloudAPI) CreateAuthenticatedRequest(method string, path string, body io.Reader) (*http.Request, error) {
+
+	authReq, err := http.NewRequest(method, path, body)
+	if !c.serviceAccount {
+		authReq.Header.Set("x-api-key", c.apiKey)
+		return authReq, nil
+	}
+
+	if c.accessToken != "" && c.accessTokenExpry+5 > time.Now().Unix() {
+		authReq.Header.Set("Authorization", "Bearer "+c.accessToken)
+		return authReq, nil
+	}
+
+	bearer := base64.StdEncoding.EncodeToString(
+		[]byte(c.clientID + ":" + c.clientSecret),
+	)
+
+	data := url.Values{}
+	data.Set("scope", "api")
+	data.Set("grant_type", "client_credentials")
+
+	req, err := http.NewRequest("POST", defaultTokenUrl, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Basic "+bearer)
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("API error: %s", resp.Status)
+	}
+
+	var response OAuth2TokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+
+	claims := &jwt.MapClaims{}
+	parser := jwt.NewParser()
+
+	_, _, err = parser.ParseUnverified(response.AccessToken, claims)
+	if err != nil {
+		return nil, fmt.Errorf("unable to decode jwt %w", err)
+	}
+
+	exp, ok := (*claims)["exp"].(float64)
+	if !ok {
+		return nil, fmt.Errorf("token does not contain exp")
+	}
+
+	expiry := time.Unix(int64(exp), 0)
+
+	c.accessTokenExpry = expiry.Unix()
+	c.accessToken = response.AccessToken
+
+	authReq.Header.Set("Authorization", "Bearer "+response.AccessToken)
+
+	return authReq, nil
 }
 
 // decodeJumpCloudEvents decodes the raw JumpCloud API response into a JumpCloudEvents object that contains events

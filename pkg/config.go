@@ -7,11 +7,15 @@ import (
 )
 
 type ConfigurationData struct {
-	APIKey  string     `json:"api_key"`
-	BaseURL string     `json:"base_url"`
-	OrgID   string     `json:"org_id"`
-	Last    *time.Time `json:"last"`
-	path    string     `json:"-"`
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
+
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+
+	OrgID string     `json:"org_id"`
+	Last  *time.Time `json:"last"`
+	path  string     `json:"-"`
 }
 
 func ReadConfigFile(path string) (*ConfigurationData, error) {

@@ -1,5 +1,7 @@
 {
-  "api_key":"this-is-not-a-real-key",
-  "base_url":"https://api.jumpcloud.com",
+  "api_key": "",
+  "base_url": "https://api.jumpcloud.com",
+  "client_id": "only set if using service account",
+  "client_secret": "only set if using service account",
   "org_id": ""
 }
