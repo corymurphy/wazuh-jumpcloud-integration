@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lbrictson/wazuh-jumpcloud-integration/pkg"
+	"wazuh-jumpcloud-integration/pkg"
 )
 
 func main() {
