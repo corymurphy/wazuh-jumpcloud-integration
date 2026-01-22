@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "dist/${APP_NAME}_${TAG}_linux_amd64" ./
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "dist/${APP_NAME}_${TAG}_linux_amd64" ./cmd/service
           (cd dist && sha256sum "${APP_NAME}_${TAG}_linux_amd64" > "${APP_NAME}_${TAG}_linux_amd64.sha256")
 
       - name: create release
